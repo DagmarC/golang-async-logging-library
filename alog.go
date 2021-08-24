@@ -83,8 +83,8 @@ func (al Alog) write(msg string, wg *sync.WaitGroup) {
 }
 
 //The shutdown() method is responsible for coordinating the shutdown of the logger. It needs to close the msgCh channel
-//to prevent the logger from receiving new messages, and then to send a message on the shutdownCompleteCh channel
-//when it's done. Update the shutdown() method to perform these actions.
+// to prevent the logger from receiving new messages, and then to send a message on the shutdownCompleteCh channel
+// when it's done. Update the shutdown() method to perform these actions.
 func (al Alog) shutdown() {
 	close(al.msgCh)
 	al.shutdownCompleteCh <- struct{}{}
