@@ -29,22 +29,37 @@ func New(w io.Writer) *Alog {
 		w = os.Stdout
 	}
 	return &Alog{
-		dest:    w,
-		msgCh:   make(chan string),
-		errorCh: make(chan error),
-		m:       &sync.Mutex{},
+		dest:               w,
+		msgCh:              make(chan string),
+		errorCh:            make(chan error),
+		m:                  &sync.Mutex{},
+		shutdownCh:         make(chan struct{}),
+		shutdownCompleteCh: make(chan struct{}),
 	}
 }
 
 // Start begins the message loop for the asynchronous logger. It should be initiated as a goroutine to prevent
 // the caller from being blocked.
 func (al Alog) Start() {
+	// WG solves this:
+	// Currently, a request to stop the log writer is handled immediately.
+	// However, it should wait for all pending messages to be written before it actually shuts down.
+	wg := &sync.WaitGroup{}
 
+OUTER:
 	for {
-		msg := <-al.msgCh
-		go al.write(msg, nil)
-	}
+		select {
 
+		case msg := <-al.msgCh:
+			wg.Add(1)
+			go al.write(msg, wg)
+
+		case <-al.shutdownCh:
+			wg.Wait()
+			al.shutdown()
+			break OUTER
+		}
+	}
 }
 
 func (al Alog) formatMessage(msg string) string {
@@ -55,7 +70,6 @@ func (al Alog) formatMessage(msg string) string {
 }
 
 func (al Alog) write(msg string, wg *sync.WaitGroup) {
-	//wg.Add(1)
 	al.m.Lock()
 	defer al.m.Unlock()
 
@@ -65,11 +79,15 @@ func (al Alog) write(msg string, wg *sync.WaitGroup) {
 			al.errorCh <- err
 		}()
 	}
-	//wg.Done()
-	//wg.Wait()
+	wg.Done()
 }
 
+//The shutdown() method is responsible for coordinating the shutdown of the logger. It needs to close the msgCh channel
+//to prevent the logger from receiving new messages, and then to send a message on the shutdownCompleteCh channel
+//when it's done. Update the shutdown() method to perform these actions.
 func (al Alog) shutdown() {
+	close(al.msgCh)
+	al.shutdownCompleteCh <- struct{}{}
 }
 
 // MessageChannel returns a channel that accepts messages that should be written to the log.
@@ -86,7 +104,14 @@ func (al Alog) ErrorChannel() <-chan error {
 
 // Stop shuts down the logger. It will wait for all pending messages to be written and then return.
 // The logger will no longer function after this method has been called.
+// When it's called, it should send a message on the shutdownCh channel to start the shutdown process and then wait for
+// the process to be completed by listening for a signal from the shutdownCompleteCh channel.
+// Update the implementation of the Stop() method to send the signal to shutdownCh and wait for the response
+// from shutdownCompleteCh.
 func (al Alog) Stop() {
+	al.shutdownCh <- struct{}{}
+	// Wait for the signal.
+	<-al.shutdownCompleteCh
 }
 
 // Write synchronously sends the message to the log output
