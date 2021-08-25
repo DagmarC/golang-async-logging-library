@@ -1,0 +1,73 @@
+
+Create the message channel
+
+The asynchronous logger already contains a field for the message channel, but it isn't initialized by the constructor function. Open alog.go and update the New function to initialize the msgCh field. Its type can be found in the Alog struct just above the New function.
+
+2
+Create the error channel
+
+Now we need to initialize the error channel. Update the object created by the New function once again. This time initialize the errorCh field. Refer to the Alog struct to find the channel's message type information.
+
+3
+Implement the MessageChannel() accessor method
+
+The Alog object encapsulates all of its fields within the alog package, but consumers of the package will need access to some of the fields in order to use the logger. Update the MessageChannel() method to return the msgCh field. Additionally, since the message channel will never send messages to consumers, return a send-only channel from the MessageChannel method.
+
+4
+Implement the ErrorChannel() accessor method
+
+In addition to the msgCh, consumers of the asynchronous log need to be able to access the errorCh field so they can react if something goes wrong while writing to the log. Implement the ErrorChannel method to return that field. Also, since messages will only be received on this channel, make sure to return a receive-only channel.
+
+5
+Implement write() method
+
+Now that alog's consumers have access to the necessary channels, it's time to start writing log entries! The method that will do the actual writing is the write() method. Start to implement the write() method by formatting the msg argument using the formatMessage() and writing the result to the io.Writer that is set in the constructor function, New().
+
+6
+Add error handling to write() method
+
+It is possible that the logger's io.Writer will return an error when the write() method attempts to write to it. Update the write method to capture the returned error variable and, if it is not nil, send it to logger's errorCh field.
+
+7
+Update Start() method to call write when message comes in
+
+The Start() method is designed to be executed as a goroutine and will contain the code that will manage the logger based on messages that it receives. Begin to implement the Start() method by creating an infinite loop that receives messages from the msgCh field. When a message arrives, it should create a goroutine that passes the message along to the write() method. The write() method expects a *sync.WaitGroup as well as the message. For now, pass nil for this argument.
+
+8
+Protect against concurrent writes to log
+
+At this point the log writer is working asynchronously. Congratulations! However, the current implementation is a bit too asynchronous. Since writing to the logs is done via goroutines, but the logger's destination isn't guaranteed to be thread safe, the logger needs to ensure that the writes are done sequentially. Start by initializing the m field in the constructor function, New(). Next, use that mutex to guard the Write() method call to the dest object in the logger's write() method. Note that the mutex should be unlocked in such a way that it will be called both when the write() method returns normally as well as in the event of a panic being generated during its execution.
+
+9
+Refactor error reporting
+
+If something goes wrong when writing to the log, the code will send an error to the error channel. While this gives the library a great way to communicate these errors, the logger will deadlock if nothing is receiving those messages. To make the logger more robust, update the code in the write() method to use a goroutine to send the error to errorCh.
+
+Create channels to shutdown logger
+
+At this point, the logger is able to log messages in a fully asynchronous manner. However, there may come a time when the consumer needs to inform the logger that it is no longer going to receive new messages and should shutdown. To start implementing that functionality, update the New() function in alog.go to initialize the shutdownCh and shutdownCompleteCh fields.
+
+2
+Implement shutdown() method
+
+The shutdown() method is responsible for coordinating the shutdown of the logger. It needs to close the msgCh channel to prevent the logger from receiving new messages, and then to send a message on the shutdownCompleteCh channel when it's done. Update the shutdown() method to perform these actions.
+
+3
+Update Start() to process messages from shutdownCh
+
+Currently, the Start() method only listens for messages on the msgCh. It needs to be expanded to listen for messages on the shutdownCh channel as well and, when a message is received on that channel, it should call shutdown(). Add a select statement within the Start() method's for loop so that messages can be processed from these two channels (msgCh and shutdownCh). If a message is received on the shutdownCh channel, call the shutdown() method, and break out of the loop.
+
+4
+Implement the Stop() method
+
+The Stop() method is the public function that consumers of the logger will use to indicate that it should be shutdown. When it's called, it should send a message on the shutdownCh channel to start the shutdown process and then wait for the process to be completed by listening for a signal from the shutdownCompleteCh channel. Update the implementation of the Stop() method to send the signal to shutdownCh and wait for the response from shutdownCompleteCh.
+
+5
+Wait for all log entries to be written before shutting down
+
+Currently, a request to stop the log writer is handled immediately. However, it should wait for all pending messages to be written before it actually shuts down.
+
+Update the Start() method to create a sync.WaitGroup object before the for loop.
+Then call the WaitGroup's Add() method before the call to the write() method.
+Pass the WaitGroup to the write() method which should be updated to call the WaitGroup's Done() method when it finishes executing.
+Finally, call the Wait() method on the WaitGroup when a message is received by the Start() method, but before it calls shutdown().
